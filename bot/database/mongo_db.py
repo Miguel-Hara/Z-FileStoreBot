@@ -1,4 +1,3 @@
-import datetime
 import dns.resolver
 from async_lru import alru_cache
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -32,8 +31,6 @@ class MongoDB(Moderation, Listener):
             dns.resolver.default_resolver.nameservers = ["8.8.8.8"]
             self.client = AsyncIOMotorClient(host=str(config.MONGO_DB_URL))
         self.db = self.client[name if name else config.MONGO_DB_NAME]
-        self.grp = self.db.groups
-        self.admins = self.db.admins
 
     @alru_cache(maxsize=10, ttl=10)
     async def add_user(self, user_id: int) -> bool:
@@ -162,95 +159,3 @@ class MongoDB(Moderation, Listener):
 
         if unsuccessful_ids_codex:
             await self.db["users"].delete_many({"_id": {"$in": unsuccessful_ids_codex}})
-
-    # Group Management Methods
-    def new_group(self, id, title):
-        """
-        Creates a new group document.
-
-        Parameters:
-            id: Group ID
-            title: Group title
-
-        Returns:
-            dict: New group document
-        """
-        return dict(
-            id = id,
-            title = title,
-            chat_status=dict(
-                is_disabled=False,
-                reason=""
-            )
-        )
-    
-    async def add_chat(self, chat, title):
-        """Add a new chat/group to database"""
-        chat = self.new_group(chat, title)
-        await self.grp.insert_one(chat)
-
-    async def get_chat(self, chat):
-        """Get chat status from database"""
-        chat = await self.grp.find_one({'id':int(chat)})
-        return False if not chat else chat.get('chat_status')
-    
-    async def delete_chat(self, chat_id):
-        """Delete a chat from database"""
-        await self.grp.delete_many({'id': int(chat_id)})
-    
-    async def total_chat_count(self):
-        """Get total number of chats in database"""
-        count = await self.grp.count_documents({})
-        return count
-    
-    async def get_all_chats(self):
-        """Get all chats from database"""
-        return self.grp.find({})
-
-    async def get_db_size(self):
-        """Get total database size"""
-        return (await self.db.command("dbstats"))['dataSize']
-
-    # Admin Management Methods
-    def new_admin(self, admin_id):
-        """
-        Creates a new admin document.
-
-        Parameters:
-            admin_id: Admin user ID
-
-        Returns:
-            dict: New admin document
-        """
-        return {
-            "id": int(admin_id),
-            "added_on": datetime.datetime.now()
-        }
-
-    async def add_admin(self, admin_id):
-        """Add a new admin to database"""
-        admin_id = int(admin_id)
-        if not await self.is_admin(admin_id):
-            await self.admins.insert_one(self.new_admin(admin_id))
-            return True
-        return False
-
-    async def remove_admin(self, admin_id):
-        """Remove an admin from database"""
-        admin_id = int(admin_id)
-        result = await self.admins.delete_one({"id": admin_id})
-        return result.deleted_count > 0
-
-    async def is_admin(self, admin_id):
-        """Check if user is admin"""
-        admin_id = int(admin_id)
-        if admin_id in config.ROOT_ADMINS_ID:
-            return True
-        admin = await self.admins.find_one({"id": admin_id})
-        return bool(admin)
-
-    async def get_all_admins(self):
-        """Get all admins from database"""
-        db_admins = [admin['id'] async for admin in self.admins.find({})]
-        all_admins = list(set(db_admins + config.ROOT_ADMINS_ID))
-        return all_admins
