@@ -197,13 +197,15 @@ async def return_start(
     buttons = []
     for i, (channel, channel_info) in enumerate(channels_n_invite.items(), start=1):
         button_text = f"• Jᴏɪɴ Cʜᴀɴɴᴇʟ {i:02d} •"
-        if i % 3 == 2:  # If it's 2nd button
+        if i % 3 == 2:
             buttons[-1].append(InlineKeyboardButton(text=button_text, url=channel_info["invite_link"]))
-        else:  # For 1st, 3rd buttons
+        else:
             buttons.append([InlineKeyboardButton(text=button_text, url=channel_info["invite_link"])])
     if message.command[1:]:
         link = f"https://t.me/{client.me.username}?start={message.command[1]}"  # type: ignore[reportOptionalMemberAccess]
         buttons.append([InlineKeyboardButton(text="Tʀʏ Aɢᴀɪɴ", url=link)])
+
+    buttons.append([InlineKeyboardButton(text="• ᴊᴏɪɴ ꜰᴏʟᴅᴇʀ •", url="https://t.me/addlist/MxstsX30sco3Y2M9")])
 
     return await PyroHelper.option_message(
         client=client,
