@@ -54,6 +54,7 @@ class Config(BaseSettings):
     WEBSITE_URL_MODE: bool = False
     WEBSITE_URL: str = "https://lx.haxanime.workers.dev"
     LOG_CHANNEL: int
+    CACHE_DURATION: int = 28800  # Set cache duration in seconds  
     USERNAME: str = "ZeroHaxJI"
     
     RATE_LIMITER: bool = True

@@ -1,9 +1,9 @@
 import datetime
+import time
 import dns.resolver
 from async_lru import alru_cache
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConfigurationError
-
 from bot.config import config
 
 from .listener import Listener
@@ -181,8 +181,34 @@ class MongoDB(Moderation, Listener):
             chat_status=dict(
                 is_disabled=False,
                 reason=""
+            ),
+            invite_link=dict(
+                link="",
+                timestamp=0
             )
         )
+
+    async def update_link(self, chat_id: int, link: str):
+        """Update the invite link for a given chat in the database."""
+        await self.grp.update_one(
+            {"id": chat_id},
+            {
+                "$set": {
+                    "invite_link.link": link,
+                    "invite_link.timestamp": time.time()
+                }
+            },
+            upsert=True
+        )
+
+    async def get_cached_link(self, chat_id: int):
+        """Retrieve a valid cached invite link if it exists."""
+        chat = await self.grp.find_one({"id": chat_id}, {"invite_link": 1})
+        if chat and chat.get("invite_link"):
+            link_data = chat["invite_link"]
+            if time.time() - link_data.get("timestamp", 0) < config.CACHE_DURATION:
+                return link_data.get("link")
+        return None
     
     async def add_chat(self, chat, title):
         """Add a new chat/group to database"""
