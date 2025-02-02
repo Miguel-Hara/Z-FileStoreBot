@@ -18,11 +18,15 @@ request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 filter_text = filters.create(lambda _, __, message: bool(message.text and not message.text.startswith("/")))
 
 async def report_error(bot: Client, error_type: str, details: str, chat_id: Optional[int] = None):
-    """Send error reports to log channel."""
     try:
         chat_info = f"\nChat ID: {chat_id}" if chat_id else ""
         error_msg = f"#{error_type}\n{details}{chat_info}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        await bot.send_message(config.LOG_CHANNEL, error_msg)
+        
+        log_channel = config.LOG_CHANNEL
+        if isinstance(log_channel, int):  # Ensure it's an integer ID
+            await bot.send_message(log_channel, error_msg)
+        else:
+            print(f"LOG_CHANNEL is not an int: {log_channel}")
     except Exception as e:
         print(f"Error sending error report: {str(e)}")
 
@@ -32,7 +36,7 @@ async def handle_flood_wait(func, *args, **kwargs):
         try:
             return await func(*args, **kwargs)
         except errors.FloodWait as e:
-            wait_time = int(float(str(e.value)) * FLOOD_WAIT_MULTIPLIER)
+            wait_time = int(e.value) * FLOOD_WAIT_MULTIPLIER   # type: ignore[reportPrivateImportUsage]
             print(f"FloodWait: Sleeping for {wait_time} seconds")
             await report_error(args[0], "FloodWait", f"Waiting for {wait_time} seconds")
             await asyncio.sleep(wait_time)
