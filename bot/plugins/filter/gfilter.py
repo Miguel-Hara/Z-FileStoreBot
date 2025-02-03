@@ -13,7 +13,7 @@ from bot.database import MongoDB
 from fuzzywuzzy import fuzz
 
 db = MongoDB()
-request_semaphore = asyncio.Semaphore(3)  # Limits concurrent API calls
+request_semaphore = asyncio.Semaphore(3)
 
 filter_text = filters.create(lambda _, __, message: bool(message.text and not message.text.startswith("/")))
 
@@ -95,10 +95,7 @@ async def search_channels(bot: Client, message: Message):
                         channel = await bot.get_chat(chat['id'])
                         title = channel.title
                     
-                    # Calculate similarity using fuzzy matching
                     similarity = fuzz.token_sort_ratio(search_text.lower(), title.lower())
-                    
-                    # If similarity is above the threshold, add to matches
                     if similarity > 60:  # 60% similarity threshold
                         link = await get_invite_link(bot, chat['id'])
                         if link:
