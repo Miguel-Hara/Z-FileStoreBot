@@ -64,73 +64,83 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
             except Exception as e:
                 print(f"Error generating invite link for {chat_id}: {str(e)}")
                 return None
-
+                
 @Client.on_message((filters.private | filters.group) & filter_text)
 @RateLimiter.hybrid_limiter(func_count=1)
 async def search_channels(bot: Client, message: Message):
     """
-    Search for channels matching user's query with fuzzy matching.
-    Returns the best matching channel.
+    Search for channels matching user's query with advanced fuzzy matching.
+    Returns the most relevant channel match.
     """
     try:
         search_text = message.text.strip()
         if len(search_text) < 3:
             return
 
+        normalized_search = ' '.join(search_text.lower().split())
+        
         cursor = await db.get_all_chats()
         chats = await cursor.to_list(length=None)
         
-        batch_size = 10
-        all_matches = []
+        best_match = None
+        highest_similarity = 0
         
-        for i in range(0, len(chats), batch_size):
-            batch = chats[i:i + batch_size]
-            
-            for chat in batch:
-                try:
-                    db_chat = await db.grp.find_one({"id": chat['id']})
-                    if db_chat and 'title' in db_chat:
-                        title = db_chat['title']
-                    else:
-                        channel = await bot.get_chat(chat['id'])
-                        title = channel.title
-                    
-                    similarity = fuzz.token_sort_ratio(search_text.lower(), title.lower())
-                    if similarity > 60:  # 60% similarity threshold
-                        link = await get_invite_link(bot, chat['id'])
-                        if link:
-                            all_matches.append({
-                                'title': title,
-                                'link': link,
-                                'similarity': similarity
-                            })
+        for chat in chats:
+            try:
+                db_chat = await db.grp.find_one({"id": chat['id']})
                 
-                except errors.ChannelInvalid:
-                    await report_error(bot, "Channel_Invalid", "Channel is invalid, removing from DB", chat['id'])
-                    await db.delete_chat(chat['id'])
-                except errors.RPCError as e:
-                    if "CHANNEL_PRIVATE" in str(e):
-                        await report_error(bot, "Channel_Private", "Channel is private, removing from DB", chat['id'])
-                        await db.delete_chat(chat['id'])
-                    else:
-                        await report_error(bot, "Channel_Error", f"Error processing channel: {str(e)}", chat['id'])
-            
-            if all_matches:
-                best_match = max(all_matches, key=lambda x: x['similarity'])
-                if best_match['similarity'] > 80:
+                if db_chat and 'title' in db_chat:
+                    title = db_chat['title']
+                else:
+                    channel = await bot.get_chat(chat['id'])
+                    title = channel.title
+                
+                normalized_title = ' '.join(title.lower().split())
+                
+                title_similarity = fuzz.token_sort_ratio(normalized_search, normalized_title)
+                partial_similarity = fuzz.partial_ratio(normalized_search, normalized_title)
+                
+                combined_similarity = (title_similarity * 0.7) + (partial_similarity * 0.3)
+                
+                keyword_match = any(
+                    word.lower() in normalized_title 
+                    for word in normalized_search.split() 
+                    if len(word) > 2
+                )
+                
+                if (combined_similarity > 60 or keyword_match) and combined_similarity > highest_similarity:
+                    link = await get_invite_link(bot, chat['id'])
+                    if link:
+                        best_match = {
+                            'title': title,
+                            'link': link,
+                            'similarity': combined_similarity
+                        }
+                        highest_similarity = combined_similarity
+                
+                if highest_similarity > 90:
                     break
-
-        if all_matches:
-            best_match = max(all_matches, key=lambda x: x['similarity'])
             
+            except errors.ChannelInvalid:
+                await report_error(bot, "Channel_Invalid", "Channel is invalid, removing from DB", chat['id'])
+                await db.delete_chat(chat['id'])
+            except errors.RPCError as e:
+                if "CHANNEL_PRIVATE" in str(e):
+                    await report_error(bot, "Channel_Private", "Channel is private, removing from DB", chat['id'])
+                    await db.delete_chat(chat['id'])
+                else:
+                    await report_error(bot, "Channel_Error", f"Error processing channel: {str(e)}", chat['id'])
+        
+        if best_match and float(best_match['similarity']) > 60:
             buttons = [[
                 InlineKeyboardButton(
                     text="ᴅᴏᴡɴʟᴏᴀᴅ",
-                    url=best_match['link']
+                    url=str(best_match['link'])
                 )
             ]]
             
             text = f"<b><a href='{best_match['link']}'>{best_match['title']}</a></b>"
+
             
             await message.reply_text(
                 text=text,
@@ -138,12 +148,18 @@ async def search_channels(bot: Client, message: Message):
                 disable_web_page_preview=True,
                 quote=True 
             )
+        else:
+            pass
 
     except Exception as e:
         error_msg = f"Error in search_channels: {str(e)}"
         print(error_msg)
         await report_error(bot, "Search_Error", error_msg)
-        await message.reply_text(
-            "An error occurred while processing your request.",
-            quote=True
-        )
+        
+        try:
+            await message.reply_text(
+                "🚨 Temporary issue. Please try again later.",
+                quote=True
+            )
+        except:
+            pass
