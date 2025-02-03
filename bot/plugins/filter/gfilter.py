@@ -10,6 +10,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from bot.utilities.helpers import RateLimiter
 from bot.config import config
 from bot.database import MongoDB
+from fuzzywuzzy import fuzz
 
 db = MongoDB()
 request_semaphore = asyncio.Semaphore(3)  # Limits concurrent API calls
@@ -64,49 +65,6 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
                 print(f"Error generating invite link for {chat_id}: {str(e)}")
                 return None
 
-def get_similarity_ratio(str1: str, str2: str) -> float:
-    """Calculate similarity ratio between two strings."""
-    return SequenceMatcher(None, str1, str2).ratio()
-
-async def process_channel(bot: Client, chat: dict, search_text: str) -> Optional[dict]:
-    """Process a single channel and check for title match."""
-    try:
-        db_chat = await db.grp.find_one({"id": chat['id']})
-        
-        if db_chat and 'title' in db_chat:
-            title = db_chat['title'].lower()
-        else:
-            print("Not Got")
-            channel = await bot.get_chat(chat['id'])
-            title = channel.title.lower()
-
-        similarity = get_similarity_ratio(search_text, title)
-        
-        if similarity > 0.6:  # 60% similarity threshold
-            link = await get_invite_link(bot, chat['id'])
-            if link:
-                return {
-                    'title': title,
-                    'link': link,
-                    'similarity': similarity
-                }
-    except errors.ChannelInvalid:
-        await report_error(bot, "Channel_Invalid", "Channel is invalid, removing from DB", chat['id'])
-        await db.delete_chat(chat['id'])
-    except errors.RPCError as e:
-        if "CHANNEL_PRIVATE" in str(e):
-            await report_error(bot, "Channel_Private", "Channel is private, removing from DB", chat['id'])
-            await db.delete_chat(chat['id'])
-        else:
-            await report_error(bot, "Channel_Error", f"Error processing channel: {str(e)}", chat['id'])
-    return None
-
-async def process_batch(bot: Client, batch: List[dict], search_text: str) -> List[dict]:
-    """Process a batch of channels concurrently."""
-    tasks = [process_channel(bot, chat, search_text) for chat in batch]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return [r for r in results if isinstance(r, dict)]
-
 @Client.on_message((filters.private | filters.group) & filter_text)
 @RateLimiter.hybrid_limiter(func_count=1)
 async def search_channels(bot: Client, message: Message):
@@ -115,7 +73,7 @@ async def search_channels(bot: Client, message: Message):
     Returns the best matching channel.
     """
     try:
-        search_text = message.text.lower().strip()
+        search_text = message.text.strip()
         if len(search_text) < 3:
             return
 
@@ -127,16 +85,47 @@ async def search_channels(bot: Client, message: Message):
         
         for i in range(0, len(chats), batch_size):
             batch = chats[i:i + batch_size]
-            results = await process_batch(bot, batch, search_text)
-            all_matches.extend(results)
             
-            best_match = get_best_match(all_matches)
-            if best_match and best_match['similarity'] > 0.8:
-                break
+            for chat in batch:
+                try:
+                    db_chat = await db.grp.find_one({"id": chat['id']})
+                    if db_chat and 'title' in db_chat:
+                        title = db_chat['title']
+                    else:
+                        channel = await bot.get_chat(chat['id'])
+                        title = channel.title
+                    
+                    # Calculate similarity using fuzzy matching
+                    similarity = fuzz.token_sort_ratio(search_text.lower(), title.lower())
+                    
+                    # If similarity is above the threshold, add to matches
+                    if similarity > 60:  # 60% similarity threshold
+                        link = await get_invite_link(bot, chat['id'])
+                        if link:
+                            all_matches.append({
+                                'title': title,
+                                'link': link,
+                                'similarity': similarity
+                            })
+                
+                except errors.ChannelInvalid:
+                    await report_error(bot, "Channel_Invalid", "Channel is invalid, removing from DB", chat['id'])
+                    await db.delete_chat(chat['id'])
+                except errors.RPCError as e:
+                    if "CHANNEL_PRIVATE" in str(e):
+                        await report_error(bot, "Channel_Private", "Channel is private, removing from DB", chat['id'])
+                        await db.delete_chat(chat['id'])
+                    else:
+                        await report_error(bot, "Channel_Error", f"Error processing channel: {str(e)}", chat['id'])
+            
+            if all_matches:
+                best_match = max(all_matches, key=lambda x: x['similarity'])
+                if best_match['similarity'] > 80:
+                    break
 
-        best_match = get_best_match(all_matches)
-        
-        if best_match:
+        if all_matches:
+            best_match = max(all_matches, key=lambda x: x['similarity'])
+            
             buttons = [[
                 InlineKeyboardButton(
                     text="ᴅᴏᴡɴʟᴏᴀᴅ",
@@ -152,9 +141,6 @@ async def search_channels(bot: Client, message: Message):
                 disable_web_page_preview=True,
                 quote=True 
             )
-        else:
-            suggest_msg = "Try searching with different spelling or keywords."
-            await message.reply_text(suggest_msg, quote=True)
 
     except Exception as e:
         error_msg = f"Error in search_channels: {str(e)}"
@@ -164,10 +150,3 @@ async def search_channels(bot: Client, message: Message):
             "An error occurred while processing your request.",
             quote=True
         )
-
-def get_best_match(matches: List[Dict]) -> Optional[Dict]:
-    """Get the channel with highest similarity score."""
-    if not matches:
-        return None
-    
-    return max(matches, key=lambda x: x['similarity'])
