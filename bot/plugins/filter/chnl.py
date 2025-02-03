@@ -1,3 +1,5 @@
+import asyncio
+
 from pyrogram import filters, enums, raw
 from pyrogram.client import Client
 from pyrogram import errors
@@ -11,26 +13,41 @@ db = MongoDB()
 
 
 @Client.on_chat_member_updated()
-async def handle_new_chat(client, chat_member_updated: ChatMemberUpdated):
-    if chat_member_updated.new_chat_member and chat_member_updated.new_chat_member.user.id == client.me.id:
+async def handle_new_chat(client: Client, chat_member_updated: ChatMemberUpdated):
+    """
+    Handle when the bot is added as an admin to a new channel/group.
+    - Extracts & stores a permanent invite link.
+    - Saves chat details to the database.
+    """
+    if chat_member_updated.new_chat_member and chat_member_updated.new_chat_member.user.id == client.me.id: # type: ignore[reportPrivateImportUsage]
         chat_id = chat_member_updated.chat.id
         chat_title = chat_member_updated.chat.title
+
         try:
             if str(chat_id).startswith("-100") and not await db.get_chat(chat_id):
                 total_members = await client.get_chat_members_count(chat_id)
-                try:
-                    get_link = await client.invoke(
-                        raw.functions.messages.ExportChatInvite( # type: ignore[reportPrivateImportUsage]
-                            peer=await client.resolve_peer(peer_id=chat_id),
-                            legacy_revoke_permanent=True,
-                            request_needed=False,
+
+                while True:
+                    try:
+                        get_link = await client.invoke(
+                            raw.functions.messages.ExportChatInvite(   # type: ignore[reportPrivateImportUsage]
+                                peer=await client.resolve_peer(chat_id), # type: ignore[reportPrivateImportUsage]
+                                legacy_revoke_permanent=True,
+                                request_needed=False,
+                            )
                         )
-                    )
-                    channel_link = get_link.link if get_link else "No link available"
-                except RPCError:
-                    channel_link = "Failed to generate invite link."
-                
+                        channel_link = get_link.link if isinstance(get_link, raw.types.ChatInviteExported) else "No link available" # type: ignore[reportPrivateImportUsage]
+                        break
+                    except errors.FloodWait as e:
+                        wait_time = e.value + 5 # type: ignore[reportPrivateImportUsage]
+                        print(f"FloodWait: Sleeping for {wait_time} seconds")
+                        await asyncio.sleep(wait_time)
+                    except errors.RPCError:
+                        channel_link = "Failed to generate invite link."
+                        break
+
                 is_private = bool(chat_member_updated.chat.username is None)
+
                 channel_text = f"""<b>📢 NEW CHAT ALERT
 
 - Name: {chat_title}
@@ -39,12 +56,17 @@ async def handle_new_chat(client, chat_member_updated: ChatMemberUpdated):
 - Members: {total_members}
 - Link: {channel_link}
 - Added by: {chat_member_updated.from_user.mention if chat_member_updated.from_user else 'Anonymous'}</b>"""
-                
+
                 await client.send_message(config.LOG_CHANNEL, channel_text, disable_web_page_preview=True)
+
+                # Save chat & invite link to DB
                 await db.add_chat(chat_id, chat_title)
+                await db.update_link(chat_id, channel_link)
 
         except Exception as e:
-            await client.send_message(config.LOG_CHANNEL, f"<b>❌ Error adding chat {chat_title}\nError: {str(e)}</b>")
+            error_msg = f"<b>❌ Error adding chat {chat_title}\nError: {str(e)}</b>"
+            print(error_msg)
+            await client.send_message(config.LOG_CHANNEL, error_msg)
 
 @Client.on_message(filters.command('leave') )
 async def leave_a_chat(bot: Client, message: Message):

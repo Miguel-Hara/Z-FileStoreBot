@@ -201,14 +201,14 @@ class MongoDB(Moderation, Listener):
             upsert=True
         )
 
-    async def get_cached_link(self, chat_id: int):
-        """Retrieve a valid cached invite link if it exists."""
-        chat = await self.grp.find_one({"id": chat_id}, {"invite_link": 1})
-        if chat and chat.get("invite_link"):
-            link_data = chat["invite_link"]
-            if time.time() - link_data.get("timestamp", 0) < config.CACHE_DURATION:
-                return link_data.get("link")
-        return None
+    # async def get_cached_link(self, chat_id: int):
+    #     """Retrieve a valid cached invite link if it exists."""
+    #     chat = await self.grp.find_one({"id": chat_id}, {"invite_link": 1})
+    #     if chat and chat.get("invite_link"):
+    #         link_data = chat["invite_link"]
+    #         if time.time() - link_data.get("timestamp", 0) < config.CACHE_DURATION:
+    #             return link_data.get("link")
+    #     return None
     
     async def add_chat(self, chat, title):
         """Add a new chat/group to database"""
