@@ -1,16 +1,18 @@
 import time
 import asyncio
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
+from difflib import SequenceMatcher
 
 from pyrogram import filters, raw, errors
 from pyrogram.client import Client
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from bot.utilities.helpers import RateLimiter
 from bot.config import config
 from bot.database import MongoDB
 
 db = MongoDB()
-request_semaphore = asyncio.Semaphore(3)
+request_semaphore = asyncio.Semaphore(3)  # Limits concurrent API calls
 
 filter_text = filters.create(lambda _, __, message: bool(message.text and not message.text.startswith("/")))
 
@@ -34,7 +36,7 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
         
         if (chat_data and 
             chat_data.get("invite_link") and 
-            chat_data["invite_link"].get("link") and 
+            chat_data["invite_link"].get("link") and  # Check if link exists and is not empty
             time.time() - chat_data["invite_link"].get("timestamp", 0) < config.CACHE_DURATION):
             return chat_data["invite_link"].get("link")
 
@@ -62,17 +64,32 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
                 print(f"Error generating invite link for {chat_id}: {str(e)}")
                 return None
 
+def get_similarity_ratio(str1: str, str2: str) -> float:
+    """Calculate similarity ratio between two strings."""
+    return SequenceMatcher(None, str1, str2).ratio()
+
 async def process_channel(bot: Client, chat: dict, search_text: str) -> Optional[dict]:
-    """
-    Processes a single channel. If its title matches the search text, retrieves or generates an invite link.
-    """
+    """Process a single channel and check for title match."""
     try:
-        async with request_semaphore:
+        db_chat = await db.grp.find_one({"id": chat['id']})
+        
+        if db_chat and 'title' in db_chat:
+            title = db_chat['title'].lower()
+        else:
+            print("Not Got")
             channel = await bot.get_chat(chat['id'])
-            if search_text in channel.title.lower():
-                link = await get_invite_link(bot, chat['id'])
-                if link:
-                    return {'title': channel.title, 'link': link}
+            title = channel.title.lower()
+
+        similarity = get_similarity_ratio(search_text, title)
+        
+        if similarity > 0.6:  # 60% similarity threshold
+            link = await get_invite_link(bot, chat['id'])
+            if link:
+                return {
+                    'title': title,
+                    'link': link,
+                    'similarity': similarity
+                }
     except errors.ChannelInvalid:
         await report_error(bot, "Channel_Invalid", "Channel is invalid, removing from DB", chat['id'])
         await db.delete_chat(chat['id'])
@@ -85,16 +102,17 @@ async def process_channel(bot: Client, chat: dict, search_text: str) -> Optional
     return None
 
 async def process_batch(bot: Client, batch: List[dict], search_text: str) -> List[dict]:
-    """Processes a batch of channels concurrently."""
+    """Process a batch of channels concurrently."""
     tasks = [process_channel(bot, chat, search_text) for chat in batch]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     return [r for r in results if isinstance(r, dict)]
 
 @Client.on_message((filters.private | filters.group) & filter_text)
+@RateLimiter.hybrid_limiter(func_count=1)
 async def search_channels(bot: Client, message: Message):
     """
-    Searches for channels matching the user's query.
-    Replies with an invite link button.
+    Search for channels matching user's query with fuzzy matching.
+    Returns the best matching channel.
     """
     try:
         search_text = message.text.lower().strip()
@@ -102,42 +120,54 @@ async def search_channels(bot: Client, message: Message):
             return
 
         cursor = await db.get_all_chats()
-        matched_channels = []
-        batch: List[dict] = []
-        batch_size = 5
-
         chats = await cursor.to_list(length=None)
-        for chat in chats:
-            batch.append(chat)
-            if len(batch) >= batch_size:
-                results = await process_batch(bot, batch, search_text)
-                matched_channels.extend(results)
-                batch = []
-                await asyncio.sleep(3)
-
-        if batch:
+        
+        batch_size = 10
+        all_matches = []
+        
+        for i in range(0, len(chats), batch_size):
+            batch = chats[i:i + batch_size]
             results = await process_batch(bot, batch, search_text)
-            matched_channels.extend(results)
+            all_matches.extend(results)
+            
+            best_match = get_best_match(all_matches)
+            if best_match and best_match['similarity'] > 0.8:
+                break
 
-        for channel in matched_channels:
+        best_match = get_best_match(all_matches)
+        
+        if best_match:
             buttons = [[
                 InlineKeyboardButton(
                     text="ᴅᴏᴡɴʟᴏᴀᴅ",
-                    url=channel['link']
+                    url=best_match['link']
                 )
             ]]
-            text = f"<b><a href='{channel['link']}'>{channel['title']}</a></b>"
+            
+            text = f"<b><a href='{best_match['link']}'>{best_match['title']}</a></b>"
+            
             await message.reply_text(
                 text=text,
                 reply_markup=InlineKeyboardMarkup(buttons),
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
+                quote=True 
             )
-
-        if not matched_channels:
-            await message.reply_text("No matching channels found.")
+        else:
+            suggest_msg = "Try searching with different spelling or keywords."
+            await message.reply_text(suggest_msg, quote=True)
 
     except Exception as e:
         error_msg = f"Error in search_channels: {str(e)}"
         print(error_msg)
         await report_error(bot, "Search_Error", error_msg)
-        await message.reply_text("An error occurred while processing your request.")
+        await message.reply_text(
+            "An error occurred while processing your request.",
+            quote=True
+        )
+
+def get_best_match(matches: List[Dict]) -> Optional[Dict]:
+    """Get the channel with highest similarity score."""
+    if not matches:
+        return None
+    
+    return max(matches, key=lambda x: x['similarity'])
