@@ -1,5 +1,5 @@
 import datetime
-import time
+import time, re
 import dns.resolver
 from async_lru import alru_cache
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -232,6 +232,46 @@ class MongoDB(Moderation, Listener):
     async def get_all_chats(self):
         """Get all chats from database"""
         return self.grp.find({})
+    
+    async def get_search_results(self, query, max_results=1, offset=0):
+        """
+        Search for channels in the MongoDB collection based on the given query.
+
+        Args:
+            query (str): The search term.
+            db (AsyncIOMotorDatabase): The MongoDB database instance.
+            max_results (int, optional): Maximum results per search. Defaults to 10.
+            offset (int, optional): Pagination offset. Defaults to 0.
+
+        Returns:
+            tuple: (list of matching channels, next offset, total results)
+        """
+        query = query.strip()
+        
+        if not query:
+            raw_pattern = '.'
+        elif ' ' not in query:
+            raw_pattern = rf'(\b|[\.\+\-_]){query}(\b|[\.\+\-_])'
+        else:
+            raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
+        
+        try:
+            regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+        except:
+            regex = query  # Fallback if regex compilation fails
+        
+        filter = {'title': regex}  # Searching by 'title' of channels
+        cursor = self.grp.find(filter)  # Assuming channels are stored in the 'groups' collection
+        cursor.sort('$natural', -1)  # Sorting by latest added
+
+        cursor.skip(offset).limit(max_results)
+        channels = await cursor.to_list(length=max_results)
+        total_results = await self.grp.count_documents(filter)
+        next_offset = offset + max_results
+        if next_offset >= total_results:
+            next_offset = ''
+        
+        return channels, next_offset, total_results
 
     async def get_db_size(self):
         """Get total database size"""

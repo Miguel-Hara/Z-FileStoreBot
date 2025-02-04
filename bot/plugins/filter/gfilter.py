@@ -1,5 +1,5 @@
 import time
-import asyncio
+import asyncio, re
 from typing import Optional, List, Dict
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -10,7 +10,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from bot.utilities.helpers import RateLimiter
 from bot.config import config
 from bot.database import MongoDB
-from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
 
 db = MongoDB()
 request_semaphore = asyncio.Semaphore(3)
@@ -64,98 +64,83 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
             except Exception as e:
                 print(f"Error generating invite link for {chat_id}: {str(e)}")
                 return None
-                
+        
+
+async def ai_spell_check(wrong_name):
+    async def search_channel(wrong_name):
+        channels, offset, total_results = await db.get_search_results(wrong_name)
+        return [channel['title'] for channel in channels]
+
+    channel_list = await search_channel(wrong_name)
+    if not channel_list:
+        return
+
+    for _ in range(5):
+        closest_match = process.extractOne(wrong_name, channel_list)
+        if not closest_match or closest_match[1] <= 80:
+            return 
+        channel = closest_match[0]
+        channels, offset, total_results = await db.get_search_results(channel)
+        if channels:
+            return channel
+        channel_list.remove(channel)
+    return
+
 @Client.on_message((filters.private | filters.group) & filter_text)
 @RateLimiter.hybrid_limiter(func_count=1)
 async def search_channels(bot: Client, message: Message):
     """
-    Search for channels matching user's query with advanced fuzzy matching.
-    Returns the most relevant channel match.
+    Search for channels using AI spell check while ignoring noise words.
+    If the resulting query (after removing words like “hindi dub”) is too short,
+    then do not perform the search.
     """
     try:
         search_text = message.text.strip()
         if len(search_text) < 3:
             return
 
-        normalized_search = ' '.join(search_text.lower().split())
-        
-        cursor = await db.get_all_chats()
-        chats = await cursor.to_list(length=None)
-        
-        best_match = None
-        highest_similarity = 0
-        
-        for chat in chats:
-            try:
-                db_chat = await db.grp.find_one({"id": chat['id']})
-                
-                if db_chat and 'title' in db_chat:
-                    title = db_chat['title']
-                else:
-                    channel = await bot.get_chat(chat['id'])
-                    title = channel.title
-                
-                normalized_title = ' '.join(title.lower().split())
-                
-                title_similarity = fuzz.token_sort_ratio(normalized_search, normalized_title)
-                partial_similarity = fuzz.partial_ratio(normalized_search, normalized_title)
-                
-                combined_similarity = (title_similarity * 0.7) + (partial_similarity * 0.3)
-                
-                keyword_match = any(
-                    word.lower() in normalized_title 
-                    for word in normalized_search.split() 
-                    if len(word) > 2
-                )
-                
-                if (combined_similarity > 60 or keyword_match) and combined_similarity > highest_similarity:
-                    link = await get_invite_link(bot, chat['id'])
-                    if link:
-                        best_match = {
-                            'title': title,
-                            'link': link,
-                            'similarity': combined_similarity
-                        }
-                        highest_similarity = combined_similarity
-                
-                if highest_similarity > 90:
-                    break
-            
-            except errors.ChannelInvalid:
-                await report_error(bot, "Channel_Invalid", "Channel is invalid, removing from DB", chat['id'])
-                await db.delete_chat(chat['id'])
-            except errors.RPCError as e:
-                if "CHANNEL_PRIVATE" in str(e):
-                    await report_error(bot, "Channel_Private", "Channel is private, removing from DB", chat['id'])
-                    await db.delete_chat(chat['id'])
-                else:
-                    await report_error(bot, "Channel_Error", f"Error processing channel: {str(e)}", chat['id'])
-        
-        if best_match and float(best_match['similarity']) > 60:
-            buttons = [[
-                InlineKeyboardButton(
-                    text="ᴅᴏᴡɴʟᴏᴀᴅ",
-                    url=str(best_match['link'])
-                )
-            ]]
-            
-            text = f"<b><a href='{best_match['link']}'>{best_match['title']}</a></b>"
+        ignore_words = {"hindi dub", "hindi dubbed", "dubbed", "dub"}
+        filtered_text = search_text
+        for word in ignore_words:
+            filtered_text = re.sub(re.escape(word), '', filtered_text, flags=re.IGNORECASE)
+        filtered_text = " ".join(filtered_text.split())
 
-            
-            await message.reply_text(
-                text=text,
-                reply_markup=InlineKeyboardMarkup(buttons),
-                disable_web_page_preview=True,
-                quote=True 
+        if not filtered_text or filtered_text.lower() in {"hindi"}:
+            return
+
+        corrected_channel = await ai_spell_check(filtered_text)
+        if not corrected_channel:
+            return
+
+        chat = await db.grp.find_one({"title": corrected_channel})
+        if not chat:
+            return
+
+        link = await get_invite_link(bot, chat['id'])
+        if not link:
+            return
+
+        buttons = [[
+            InlineKeyboardButton(
+                text="ᴅᴏᴡɴʟᴏᴀᴅ",
+                url=str(link)
             )
-        else:
-            pass
+        ]]
+        
+        text = f"<b><a href='{link}'>{chat['title']}</a></b>"
+
+        await message.reply_text(
+            text=text,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+            quote=True 
+        )
 
     except Exception as e:
         error_msg = f"Error in search_channels: {str(e)}"
         print(error_msg)
         await report_error(bot, "Search_Error", error_msg)
-        
+
         try:
             await message.reply_text(
                 "🚨 Temporary issue. Please try again later.",

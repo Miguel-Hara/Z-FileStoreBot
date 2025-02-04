@@ -8,6 +8,7 @@ from pyrogram.errors.exceptions.bad_request_400 import MessageTooLong
 from pyrogram.errors import RPCError
 from bot.config import config
 from bot.database import MongoDB
+from bot.utilities.pyrofilters import PyroFilters
 
 db = MongoDB()
 
@@ -68,7 +69,7 @@ async def handle_new_chat(client: Client, chat_member_updated: ChatMemberUpdated
             print(error_msg)
             await client.send_message(config.LOG_CHANNEL, error_msg)
 
-@Client.on_message(filters.command('leave') )
+@Client.on_message(filters.command('leave') & PyroFilters.admin())
 async def leave_a_chat(bot: Client, message: Message):
     r = message.text.split(None)
     if len(message.command) == 1:
@@ -99,16 +100,18 @@ async def leave_a_chat(bot: Client, message: Message):
     except Exception as e:
         await message.reply(f'<b>🚫 ᴇʀʀᴏʀ - `{e}`</b>')
 
-@Client.on_message(filters.command('groups') )
+@Client.on_message(filters.command('groups') & PyroFilters.admin())
 async def groups_list(bot: Client, message: Message):
     msg = await message.reply('<b>Searching...</b>')
     chats = await db.get_all_chats()
     out = "Groups saved in the database:\n\n"
     count = 1
+
     async for chat in chats:
         try:
-            chat_info = await bot.get_chat(chat['id'])
-            members_count = chat_info.members_count if chat_info.members_count else "Unknown"
+            # chat_info = await bot.get_chat(chat['id'])
+            # members_count = chat_info.members_count if chat_info.members_count else "Unknown"
+            members_count = "69"
             out += f"<b>{count}. Title - `{chat['title']}`\nID - `{chat['id']}`\nMembers - `{members_count}`</b>\n\n"
             count += 1
         except errors.ChannelPrivate:
@@ -121,7 +124,8 @@ async def groups_list(bot: Client, message: Message):
         else:
             await msg.edit_text("<b>No groups found</b>")
     except MessageTooLong:
-        with open('chats.txt', 'w+') as outfile:
+        await msg.delete()
+        with open('chats.txt', 'w+', encoding='utf-8') as outfile:
             outfile.write(out)
         await message.reply_document('chats.txt', caption="<b>List of all groups</b>")
 
