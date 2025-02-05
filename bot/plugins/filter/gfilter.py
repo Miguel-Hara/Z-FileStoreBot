@@ -91,7 +91,7 @@ async def ai_spell_check(wrong_name):
     return
 
 @Client.on_message((filters.private | filters.group) & filter_text)
-@RateLimiter.hybrid_limiter(func_count=1, per=5)
+@RateLimiter.hybrid_limiter(func_count=1)
 async def search_channels(bot: Client, message: Message):
     """
     Search for channels using AI spell check while ignoring noise words.
