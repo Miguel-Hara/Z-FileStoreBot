@@ -34,7 +34,7 @@ async def handle_new_chat(client: Client, chat_member_updated: ChatMemberUpdated
                             raw.functions.messages.ExportChatInvite(   # type: ignore[reportPrivateImportUsage]
                                 peer=await client.resolve_peer(chat_id), # type: ignore[reportPrivateImportUsage]
                                 legacy_revoke_permanent=True,
-                                request_needed=False,
+                                request_needed=True,
                             )
                         )
                         channel_link = get_link.link if isinstance(get_link, raw.types.ChatInviteExported) else "No link available" # type: ignore[reportPrivateImportUsage]

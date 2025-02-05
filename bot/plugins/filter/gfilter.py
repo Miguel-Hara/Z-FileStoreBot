@@ -47,7 +47,7 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
                     raw.functions.messages.ExportChatInvite( # type: ignore[reportPrivateImportUsage]
                         peer=await bot.resolve_peer(chat_id), # type: ignore[reportPrivateImportUsage]
                         legacy_revoke_permanent=True,
-                        request_needed=False,
+                        request_needed=True,
                     )
                 )
                 if isinstance(invite_link, raw.types.ChatInviteExported) and invite_link.link: # type: ignore[reportPrivateImportUsage]
