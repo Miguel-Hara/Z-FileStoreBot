@@ -61,6 +61,10 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
             except errors.ChatAdminRequired:
                 await report_error(bot, "Chat_Admin_Required", "Bot lacks admin rights.", chat_id)
                 return None
+            except errors.RPCError as e:
+                if "CHANNEL_PRIVATE" in str(e):
+                    await report_error(bot, "Channel_Private", "The channel/supergroup is not accessible.", chat_id)
+                return None
             except Exception as e:
                 print(f"Error generating invite link for {chat_id}: {str(e)}")
                 return None
@@ -87,7 +91,7 @@ async def ai_spell_check(wrong_name):
     return
 
 @Client.on_message((filters.private | filters.group) & filter_text)
-@RateLimiter.hybrid_limiter(func_count=1)
+@RateLimiter.hybrid_limiter(func_count=1, per=5)
 async def search_channels(bot: Client, message: Message):
     """
     Search for channels using AI spell check while ignoring noise words.
