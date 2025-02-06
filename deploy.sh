@@ -1,4 +1,3 @@
 #!/bin/sh
 
-pip install -r requirements.txt
-python -m bot.main
+python3 -m bot.main
