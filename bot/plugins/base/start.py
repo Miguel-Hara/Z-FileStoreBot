@@ -201,11 +201,13 @@ async def return_start(
             buttons[-1].append(InlineKeyboardButton(text=button_text, url=channel_info["invite_link"]))
         else:
             buttons.append([InlineKeyboardButton(text=button_text, url=channel_info["invite_link"])])
+            
+    buttons.append([InlineKeyboardButton(text="• ᴊᴏɪɴ ꜰᴏʟᴅᴇʀ •", url="https://t.me/addlist/MxstsX30sco3Y2M9")])
     if message.command[1:]:
         link = f"https://t.me/{client.me.username}?start={message.command[1]}"  # type: ignore[reportOptionalMemberAccess]
         buttons.append([InlineKeyboardButton(text="Tʀʏ Aɢᴀɪɴ", url=link)])
 
-    buttons.append([InlineKeyboardButton(text="• ᴊᴏɪɴ ꜰᴏʟᴅᴇʀ •", url="https://t.me/addlist/MxstsX30sco3Y2M9")])
+
 
     return await PyroHelper.option_message(
         client=client,
