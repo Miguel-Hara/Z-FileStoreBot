@@ -18,7 +18,6 @@ request_semaphore = asyncio.Semaphore(3)
 filter_text = filters.create(lambda _, __, message: bool(message.text and not message.text.startswith("/")))
 
 async def report_error(bot: Client, error_type: str, details: str, chat_id: Optional[int] = None):
-    """Logs errors to a configured log channel."""
     try:
         chat_info = f"\nChat ID: {chat_id}" if chat_id else ""
         error_msg = f"#{error_type}\n{details}{chat_info}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
@@ -71,10 +70,15 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
         
 
 async def ai_spell_check(wrong_name):
-    async def search_channel(wrong_name):
-        channels, offset, total_results = await db.get_search_results(wrong_name)
-        return [channel['title'] for channel in channels]
-
+    """Performs fuzzy matching to find the closest matching channel name."""
+    async def search_channel(name):
+        try:
+            channels, offset, total_results = await asyncio.wait_for(db.get_search_results(name), timeout=40)
+            return [channel['title'] for channel in channels]
+        except Exception as e:
+            print(f"Error in search_channel for '{name}': {str(e)}")
+            return []
+    
     channel_list = await search_channel(wrong_name)
     if not channel_list:
         return
@@ -84,7 +88,11 @@ async def ai_spell_check(wrong_name):
         if not closest_match or closest_match[1] <= 80:
             return 
         channel = closest_match[0]
-        channels, offset, total_results = await db.get_search_results(channel)
+        try:
+            channels, offset, total_results = await asyncio.wait_for(db.get_search_results(channel), timeout=40)
+        except Exception as e:
+            print(f"Error in search_channel for corrected channel '{channel}': {str(e)}")
+            channels = []
         if channels:
             return channel
         channel_list.remove(channel)
@@ -144,11 +152,4 @@ async def search_channels(bot: Client, message: Message):
         error_msg = f"Error in search_channels: {str(e)}"
         print(error_msg)
         await report_error(bot, "Search_Error", error_msg)
-
-        try:
-            await message.reply_text(
-                "🚨 Temporary issue. Please try again later.",
-                quote=True
-            )
-        except:
-            pass
+        pass
