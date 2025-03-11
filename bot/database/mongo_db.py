@@ -251,16 +251,13 @@ class MongoDB(Moderation, Listener):
         if not query:
             return [], '', 0
 
-        # Fetch all channel titles
         all_channels_cursor = self.grp.find({}, {"title": 1})
         all_channels = await all_channels_cursor.to_list(length=None)
         all_channel_titles = [channel['title'] for channel in all_channels]
 
-        # Use fuzzy matching to find the best matches
         matched_titles = process.extract(query, all_channel_titles, limit=max_results)
         matched_channel_titles = [title for title, score in matched_titles if score >= 80]
 
-        # Retrieve the full channel documents for the matched titles
         channels_cursor = self.grp.find({"title": {"$in": matched_channel_titles}})
         channels = await channels_cursor.to_list(length=max_results)
 
@@ -273,7 +270,7 @@ class MongoDB(Moderation, Listener):
         """Get total database size"""
         return (await self.db.command("dbstats"))['dataSize']
 
-    # Admin Management Methods
+    # Admin Management
     def new_admin(self, admin_id):
         """
         Creates a new admin document.
