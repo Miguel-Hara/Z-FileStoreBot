@@ -51,18 +51,18 @@ async def ai_spell_check(wrong_name):
             return []
 
     channel_list = await search_channel(wrong_name)
-    if not channel_list: return
+    if not channel_list: return ""
     
     for _ in range(5):
         closest_match = process.extractOne(wrong_name, channel_list)
-        if not closest_match or closest_match[1] <= 80: return
+        if not closest_match or closest_match[1] <= 80: return ""
         
         channel = closest_match[0]
         channels = await search_channel(channel)
         if channels: return channel
         channel_list.remove(channel)
     
-    return
+    return ""
 
 @Client.on_message(filters.private | filters.group)
 @RateLimiter.hybrid_limiter(func_count=1)
@@ -73,7 +73,12 @@ async def search_channels(bot: Client, message: Message):
         search_text = message.text.strip()
         if len(search_text) < 3:
             return
-        ignore_words = {"hindi dub", "hindi dubbed", "dubbed", "dub"}
+        ignore_words = {
+            "hindi dub", "hindi dubbed", "dubbed", "dub",
+            "please", "pls", "plz", "dedo", "deedo", "mujhe", "dekhna hai", "ka",
+            "new", "episode", "ep", "milega?", "milega", "milega yahan", "hain",
+            "hai kya", "available", "give", "give me", "ha"
+        }
         for word in ignore_words:
             search_text = re.sub(re.escape(word), '', search_text, flags=re.IGNORECASE)
         search_text = " ".join(search_text.split())
