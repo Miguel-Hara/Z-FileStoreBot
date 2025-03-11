@@ -97,4 +97,4 @@ async def search_channels(bot: Client, message: Message):
         )
     except Exception as e:
         await bot.send_message(config.LOG_CHANNEL, f"#Search_Error\n{str(e)}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
+        pass
