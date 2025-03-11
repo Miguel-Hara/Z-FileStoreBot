@@ -5,6 +5,7 @@ from async_lru import alru_cache
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConfigurationError
 from bot.config import config
+from thefuzz import process
 
 from .listener import Listener
 from .moderation import Moderation
@@ -233,13 +234,12 @@ class MongoDB(Moderation, Listener):
         """Get all chats from database"""
         return self.grp.find({})
     
-    async def get_search_results(self, query, max_results=1, offset=0):
+    async def get_search_results(self, query: str, max_results=10, offset=0):
         """
         Search for channels in the MongoDB collection based on the given query.
 
         Args:
             query (str): The search term.
-            db (AsyncIOMotorDatabase): The MongoDB database instance.
             max_results (int, optional): Maximum results per search. Defaults to 10.
             offset (int, optional): Pagination offset. Defaults to 0.
 
@@ -249,28 +249,24 @@ class MongoDB(Moderation, Listener):
         query = query.strip()
         
         if not query:
-            raw_pattern = '.'
-        elif ' ' not in query:
-            raw_pattern = rf'(\b|[\.\+\-_]){query}(\b|[\.\+\-_])'
-        else:
-            raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
-        
-        try:
-            regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-        except:
-            regex = query  # Fallback if regex compilation fails
-        
-        filter = {'title': regex}  # Searching by 'title' of channels
-        cursor = self.grp.find(filter)  # Assuming channels are stored in the 'groups' collection
-        cursor.sort('$natural', -1)  # Sorting by latest added
+            return [], '', 0
 
-        cursor.skip(offset).limit(max_results)
-        channels = await cursor.to_list(length=max_results)
-        total_results = await self.grp.count_documents(filter)
-        next_offset = offset + max_results
-        if next_offset >= total_results:
-            next_offset = ''
-        
+        # Fetch all channel titles
+        all_channels_cursor = self.grp.find({}, {"title": 1})
+        all_channels = await all_channels_cursor.to_list(length=None)
+        all_channel_titles = [channel['title'] for channel in all_channels]
+
+        # Use fuzzy matching to find the best matches
+        matched_titles = process.extract(query, all_channel_titles, limit=max_results)
+        matched_channel_titles = [title for title, score in matched_titles if score >= 80]
+
+        # Retrieve the full channel documents for the matched titles
+        channels_cursor = self.grp.find({"title": {"$in": matched_channel_titles}})
+        channels = await channels_cursor.to_list(length=max_results)
+
+        total_results = len(channels)
+        next_offset = offset + max_results if total_results == max_results else ''
+
         return channels, next_offset, total_results
 
     async def get_db_size(self):

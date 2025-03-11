@@ -49,18 +49,17 @@ async def handle_new_chat(client: Client, chat_member_updated: ChatMemberUpdated
 
                 is_private = bool(chat_member_updated.chat.username is None)
 
-                channel_text = f"""<b>📢 NEW CHAT ALERT
+                channel_text = f"""<b>ɴᴇᴡ ᴄʜᴀᴛ ᴀʟᴇʀᴛ  
 
-- Name: {chat_title}
-- ID: <code>{chat_id}</code>
-- Type: {'Private' if is_private else 'Public'} Chat
-- Members: {total_members}
-- Link: {channel_link}
-- Added by: {chat_member_updated.from_user.mention if chat_member_updated.from_user else 'Anonymous'}</b>"""
+- ɴᴀᴍᴇ: {chat_title}  
+- ɪᴅ: <code>{chat_id}</code>  
+- ᴛʏᴘᴇ: {'ᴘʀɪᴠᴀᴛᴇ' if is_private else 'ᴘᴜʙʟɪᴄ'} ᴄʜᴀᴛ  
+- ᴍᴇᴍʙᴇʀs: {total_members}  
+- ʟɪɴᴋ: {channel_link}  
+- ᴀᴅᴅᴇᴅ ʙʏ: {chat_member_updated.from_user.mention if chat_member_updated.from_user else 'ᴀɴᴏɴʏᴍᴏᴜs'}</b>"""
+
 
                 await client.send_message(config.LOG_CHANNEL, channel_text, disable_web_page_preview=True)
-
-                # Save chat & invite link to DB
                 await db.add_chat(chat_id, chat_title)
                 await db.update_link(chat_id, channel_link)
 
