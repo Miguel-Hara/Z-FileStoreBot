@@ -68,7 +68,7 @@ async def ai_spell_check(wrong_name):
 @RateLimiter.hybrid_limiter(func_count=1)
 async def search_channels(bot: Client, message: Message):
     try:
-        if message.text.startswith("/"):
+        if not message.text or message.text.startswith("/"):
             return
         search_text = message.text.strip()
         if len(search_text) < 3:
