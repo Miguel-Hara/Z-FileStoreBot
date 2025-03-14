@@ -68,12 +68,6 @@ async def ai_spell_check(wrong_name):
    
    return ""
 
-async def fuzzy_search(search_text):
-    all_titles = [doc["title"] async for doc in db.grp.find({}, {"title": 1})]
-    best_match = process.extractOne(search_text, all_titles)
-    if best_match and best_match[1] > 90:
-        return best_match[0]
-    return search_text
 
 @Client.on_message(filters.private | filters.group)
 @RateLimiter.hybrid_limiter(func_count=1)
@@ -96,8 +90,6 @@ async def search_channels(bot: Client, message: Message):
         if not search_text or search_text.lower() in {"hindi"}:
             return
         
-        search_text = await fuzzy_search(search_text)
-
         filter = {'title': {'$regex': f".*{re.escape(search_text)}.*", '$options': 'i'}}
         cursor = db.grp.find(filter).limit(10)
         channels = await cursor.to_list(length=10)
