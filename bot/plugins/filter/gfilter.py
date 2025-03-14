@@ -34,35 +34,46 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
         await asyncio.sleep(int(e.value) + 5)  # type: ignore[reportPrivateImportUsage]
         return await get_invite_link(bot, chat_id)
     except errors.ChatAdminRequired:
-        await bot.send_message(config.LOG_CHANNEL, f"#Chat_Admin_Required\nBot lacks admin rights.\nChat ID: {chat_id}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        await bot.leave_chat(chat_id)
+        await db.delete_chat(chat_id)
     except errors.RPCError as e:
         if "CHANNEL_PRIVATE" in str(e):
-            await bot.send_message(config.LOG_CHANNEL, f"#Channel_Private\nThe channel/supergroup is not accessible.\nChat ID: {chat_id}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await bot.leave_chat(chat_id)
+            await db.delete_chat(chat_id)
     except Exception as e:
         await bot.send_message(config.LOG_CHANNEL, f"#Invite_Link_Error\n{str(e)}\nChat ID: {chat_id}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    return None
+        await bot.leave_chat(chat_id)
+        await db.delete_chat(chat_id)
+
 
 async def ai_spell_check(wrong_name):
-    async def search_channel(name):
-        try:
-            channels, _, _ = await asyncio.wait_for(db.get_search_results(name), timeout=40)
-            return [channel['title'] for channel in channels]
-        except Exception:
-            return []
+   async def search_channel(name):
+       try:
+           channels, _, _ = await asyncio.wait_for(db.get_search_results(name, max_results=10), timeout=40)
+           return [channel['title'] for channel in channels]
+       except Exception:
+           return []
 
-    channel_list = await search_channel(wrong_name)
-    if not channel_list: return ""
-    
-    for _ in range(5):
-        closest_match = process.extractOne(wrong_name, channel_list)
-        if not closest_match or closest_match[1] <= 80: return ""
-        
-        channel = closest_match[0]
-        channels = await search_channel(channel)
-        if channels: return channel
-        channel_list.remove(channel)
-    
-    return ""
+   channel_list = await search_channel(wrong_name)
+   if not channel_list: return ""
+   
+   for _ in range(5):
+       closest_match = process.extractOne(wrong_name, channel_list)
+       if not closest_match or closest_match[1] <= 80: return ""
+       
+       channel = closest_match[0]
+       channels = await search_channel(channel)
+       if channels: return channel
+       channel_list.remove(channel)
+   
+   return ""
+
+async def fuzzy_search(search_text):
+    all_titles = [doc["title"] async for doc in db.grp.find({}, {"title": 1})]
+    best_match = process.extractOne(search_text, all_titles)
+    if best_match and best_match[1] > 90:
+        return best_match[0]
+    return search_text
 
 @Client.on_message(filters.private | filters.group)
 @RateLimiter.hybrid_limiter(func_count=1)
@@ -74,31 +85,58 @@ async def search_channels(bot: Client, message: Message):
         if len(search_text) < 3:
             return
         ignore_words = {
-            "hindi dub", "hindi dubbed", "dubbed", "dub",
+            "hindi dub", "hindi dubbed", "dubbed", "dub", "hindi dubed", "hindi dubbing", "hindi dubbbed",
             "please", "pls", "plz", "dedo", "deedo", "mujhe", "dekhna hai", "ka",
             "new", "episode", "ep", "milega?", "milega", "milega yahan", "hain",
-            "hai kya", "available", "give", "give me", "ha"
+            "hai kya", "available", "give", "give me", "ha", "anime",
         }
         for word in ignore_words:
             search_text = re.sub(re.escape(word), '', search_text, flags=re.IGNORECASE)
         search_text = " ".join(search_text.split())
         if not search_text or search_text.lower() in {"hindi"}:
             return
-        corrected_channel = await ai_spell_check(search_text)
-        if not corrected_channel:
-            return
-        chat = await db.grp.find_one({"title": corrected_channel})
-        if not chat:
-            return
-        link = await get_invite_link(bot, chat['id'])
-        if not link:
-            return
-        buttons = [[InlineKeyboardButton(text="ᴅᴏᴡɴʟᴏᴀᴅ", url=str(link))]]
-        await message.reply_text(
-            text=f"<b><a href='{link}'>{chat['title']}</a></b>",
-            reply_markup=InlineKeyboardMarkup(buttons),
-            disable_web_page_preview=True,
-            quote=True
-        )
+        
+        search_text = await fuzzy_search(search_text)
+
+        filter = {'title': {'$regex': f".*{re.escape(search_text)}.*", '$options': 'i'}}
+        cursor = db.grp.find(filter).limit(10)
+        channels = await cursor.to_list(length=10)
+        
+        if not channels:
+            corrected_channel = await ai_spell_check(search_text)
+            if not corrected_channel:
+                return
+            chat = await db.grp.find_one({"title": corrected_channel})
+            if not chat:
+                return
+            link = await get_invite_link(bot, chat['id'])
+            if not link:
+                return
+            buttons = [[InlineKeyboardButton(text="ᴅᴏᴡɴʟᴏᴀᴅ", url=str(link))]]
+            await message.reply_text(
+                text=f"<b>1. <a href='{link}'>{chat['title']}</a></b>",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                disable_web_page_preview=True,
+                quote=True
+            )
+        else:
+            text = ""
+            buttons = []
+            item_number = 1
+
+            for channel in channels:
+                link = await get_invite_link(bot, channel['id'])
+                if link:
+                    text += f"<b>{item_number}. <a href='{link}'>{channel['title']}</a></b>\n\n"
+                    buttons.append([InlineKeyboardButton(text=f"Dᴏᴡɴʟᴏᴀᴅ {item_number}", url=str(link))])
+                    item_number += 1
+
+            
+            await message.reply_text(
+                text=text,
+                reply_markup=InlineKeyboardMarkup(buttons),
+                disable_web_page_preview=True,
+                quote=True
+            )
     except Exception as e:
         await bot.send_message(config.LOG_CHANNEL, f"#Search_Error\n{str(e)}")

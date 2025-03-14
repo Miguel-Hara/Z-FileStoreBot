@@ -15,14 +15,15 @@ db = MongoDB()
 
 @Client.on_chat_member_updated()
 async def handle_new_chat(client: Client, chat_member_updated: ChatMemberUpdated):
-    """
-    Handle when the bot is added as an admin to a new channel/group.
-    - Extracts & stores a permanent invite link.
-    - Saves chat details to the database.
-    """
     if chat_member_updated.new_chat_member and chat_member_updated.new_chat_member.user.id == client.me.id: # type: ignore[reportPrivateImportUsage]
         chat_id = chat_member_updated.chat.id
         chat_title = chat_member_updated.chat.title
+
+        added_by = chat_member_updated.from_user
+
+        if added_by and added_by.id not in config.ROOT_ADMINS_ID:
+            await client.leave_chat(chat_id)
+            return
 
         try:
             if str(chat_id).startswith("-100") and not await db.get_chat(chat_id):
@@ -57,7 +58,6 @@ async def handle_new_chat(client: Client, chat_member_updated: ChatMemberUpdated
 - ᴍᴇᴍʙᴇʀs: {total_members}  
 - ʟɪɴᴋ: {channel_link}  
 - ᴀᴅᴅᴇᴅ ʙʏ: {chat_member_updated.from_user.mention if chat_member_updated.from_user else 'ᴀɴᴏɴʏᴍᴏᴜs'}</b>"""
-
 
                 await client.send_message(config.LOG_CHANNEL, channel_text, disable_web_page_preview=True)
                 await db.add_chat(chat_id, chat_title)
