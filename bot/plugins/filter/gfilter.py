@@ -68,7 +68,6 @@ async def ai_spell_check(wrong_name):
    
    return ""
 
-
 @Client.on_message(filters.private | filters.group)
 @RateLimiter.hybrid_limiter(func_count=1)
 async def search_channels(bot: Client, message: Message):
