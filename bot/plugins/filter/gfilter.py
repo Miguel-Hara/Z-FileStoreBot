@@ -89,7 +89,7 @@ async def search_channels(bot: Client, message: Message):
         if not search_text or search_text.lower() in {"hindi"}:
             return
         
-        filter = {'title': {'$regex': f".*{re.escape(search_text)}.*", '$options': 'i'}}
+        filter = {'title': {'$regex': search_text, '$options': 'i'}}
         cursor = db.grp.find(filter).limit(10)
         channels = await cursor.to_list(length=10)
         
