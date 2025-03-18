@@ -34,39 +34,55 @@ async def get_invite_link(bot: Client, chat_id: int) -> Optional[str]:
         await asyncio.sleep(int(e.value) + 5)  # type: ignore[reportPrivateImportUsage]
         return await get_invite_link(bot, chat_id)
     except errors.ChatAdminRequired:
-        await bot.leave_chat(chat_id)
-        await db.delete_chat(chat_id)
-    except errors.RPCError as e:
-        if "CHANNEL_PRIVATE" in str(e):
+        try:
             await bot.leave_chat(chat_id)
             await db.delete_chat(chat_id)
+        except:
+            pass
+    except errors.RPCError as e:
+        if "CHANNEL_PRIVATE" in str(e):
+            try:
+                await bot.leave_chat(chat_id)
+                await db.delete_chat(chat_id)
+            except:
+                pass
     except Exception as e:
-        await bot.send_message(config.LOG_CHANNEL, f"#Invite_Link_Error\n{str(e)}\nChat ID: {chat_id}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        await bot.leave_chat(chat_id)
-        await db.delete_chat(chat_id)
+        try:
+            await bot.send_message(config.LOG_CHANNEL, f"#Invite_Link_Error\n{str(e)}\nChat ID: {chat_id}\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            await bot.leave_chat(chat_id)
+            await db.delete_chat(chat_id)
+        except:
+            pass
 
 
 async def ai_spell_check(wrong_name):
-   async def search_channel(name):
-       try:
-           channels, _, _ = await asyncio.wait_for(db.get_search_results(name, max_results=10), timeout=40)
-           return [channel['title'] for channel in channels]
-       except Exception:
-           return []
+    async def search_channel(name):
+        try:
+            channels, _, _ = await asyncio.wait_for(db.get_search_results(name, max_results=10), timeout=40)
+            return channels
+        except Exception:
+            return []
 
-   channel_list = await search_channel(wrong_name)
-   if not channel_list: return ""
-   
-   for _ in range(5):
-       closest_match = process.extractOne(wrong_name, channel_list)
-       if not closest_match or closest_match[1] <= 80: return ""
-       
-       channel = closest_match[0]
-       channels = await search_channel(channel)
-       if channels: return channel
-       channel_list.remove(channel)
-   
-   return ""
+    channel_list = await search_channel(wrong_name)
+    if not channel_list: return []
+    
+    matched_channels = []
+    for _ in range(5):
+        if not channel_list:
+            break
+        channel_titles = [channel['title'] for channel in channel_list]
+        closest_match = process.extractOne(wrong_name, channel_titles)
+        if not closest_match or closest_match[1] <= 80:
+            break
+        
+        matched_title = closest_match[0]
+        matched_channel = next((ch for ch in channel_list if ch['title'] == matched_title), None)
+        if matched_channel:
+            matched_channels.append(matched_channel)
+            channel_list.remove(matched_channel)
+            if len(matched_channels) >= 3:
+                break
+    return matched_channels
 
 @Client.on_message(filters.private | filters.group)
 @RateLimiter.hybrid_limiter(func_count=1)
@@ -81,31 +97,26 @@ async def search_channels(bot: Client, message: Message):
             "hindi dub", "hindi dubbed", "dubbed", "dub", "hindi dubed", "hindi dubbing", "hindi dubbbed",
             "please", "pls", "plz", "dedo", "deedo", "mujhe", "dekhna hai", "ka",
             "new", "episode", "ep", "milega?", "milega", "milega yahan", "hain",
-            "hai kya", "available", "give", "give me", "ha", "anime",
+            "hai kya", "available", "give", "give me", "ha", "anime", "in", "the",
         }
         for word in ignore_words:
             search_text = re.sub(re.escape(word), '', search_text, flags=re.IGNORECASE)
         search_text = " ".join(search_text.split())
         if not search_text or search_text.lower() in {"hindi"}:
             return
-        
-        filter = {'title': {'$regex': search_text, '$options': 'i'}}
-        cursor = db.grp.find(filter).limit(10)
-        channels = await cursor.to_list(length=10)
-        
-        if not channels:
-            corrected_channel = await ai_spell_check(search_text)
-            if not corrected_channel:
-                return
-            chat = await db.grp.find_one({"title": corrected_channel})
-            if not chat:
-                return
+            
+        matched_channels = await ai_spell_check(search_text)
+        if not matched_channels:
+            return
+            
+        if len(matched_channels) == 1:
+            chat = matched_channels[0]
             link = await get_invite_link(bot, chat['id'])
             if not link:
                 return
             buttons = [[InlineKeyboardButton(text="ᴅᴏᴡɴʟᴏᴀᴅ", url=str(link))]]
             await message.reply_text(
-                text=f"<b>1. <a href='{link}'>{chat['title']}</a></b>",
+                text=f"<b><a href='{link}'>{chat['title']}</a></b>",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 disable_web_page_preview=True,
                 quote=True
@@ -114,15 +125,14 @@ async def search_channels(bot: Client, message: Message):
             text = ""
             buttons = []
             item_number = 1
-
-            for channel in channels:
+            
+            for channel in matched_channels:
                 link = await get_invite_link(bot, channel['id'])
                 if link:
                     text += f"<b>{item_number}. <a href='{link}'>{channel['title']}</a></b>\n\n"
                     buttons.append([InlineKeyboardButton(text=f"Dᴏᴡɴʟᴏᴀᴅ {item_number}", url=str(link))])
                     item_number += 1
-
-            
+           
             await message.reply_text(
                 text=text,
                 reply_markup=InlineKeyboardMarkup(buttons),
