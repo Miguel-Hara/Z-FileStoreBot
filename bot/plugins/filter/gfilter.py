@@ -97,7 +97,7 @@ async def search_channels(bot: Client, message: Message):
             "hindi dub", "hindi dubbed", "dubbed", "dub", "hindi dubed", "hindi dubbing", "hindi dubbbed",
             "please", "pls", "plz", "dedo", "deedo", "mujhe", "dekhna hai", "ka",
             "new", "episode", "ep", "milega?", "milega", "milega yahan", "hain",
-            "hai kya", "available", "give", "give me", "ha", "anime", "in", "the",
+            "hai kya", "available", "give", "give me", "ha", "anime", "the",
         }
         for word in ignore_words:
             search_text = re.sub(re.escape(word), '', search_text, flags=re.IGNORECASE)
