@@ -22,8 +22,10 @@ async def handle_new_chat(client: Client, chat_member_updated: ChatMemberUpdated
         added_by = chat_member_updated.from_user
 
         if added_by and added_by.id not in config.ROOT_ADMINS_ID:
-            await client.leave_chat(chat_id)
-            return
+            is_admin = await db.is_admin(added_by.id)
+            if not is_admin:
+                await client.leave_chat(chat_id)
+                return
 
         try:
             if str(chat_id).startswith("-100") and not await db.get_chat(chat_id):
